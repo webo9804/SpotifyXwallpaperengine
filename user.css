@@ -1,0 +1,97 @@
+:root {
+  --background-base: transparent !important;
+  --background-highlight: rgba(255, 255, 255, 0.1) !important;
+  --background-press: rgba(255, 255, 255, 0.2) !important;
+  --background-elevated-base: transparent !important;
+  --background-elevated-highlight: rgba(255, 255, 255, 0.1) !important;
+  --background-elevated-press: rgba(255, 255, 255, 0.2) !important;
+  --background-tinted-base: transparent !important;
+  --background-tinted-highlight: rgba(255, 255, 255, 0.1) !important;
+  --background-tinted-press: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* 核心容器全透明 */
+body,
+html,
+#main,
+.Root__top-container,
+.Root__nav-block,
+.Root__main-view,
+.Root__now-playing-bar,
+.Root__right-sidebar,
+.main-view-container,
+.main-view-container__scroll-node,
+.main-view-container__scroll-node-child,
+.os-host,
+.os-padding,
+.os-viewport,
+.os-content {
+    background-color: transparent !important;
+    background: transparent !important;
+    background-image: none !important;
+}
+
+/* 殺掉所有漸層跟實色背景 (歌單頂部、導覽列) */
+.main-entityHeader-background,
+.main-entityHeader-overlay,
+.main-entityHeader-backgroundColor,
+.main-actionBarBackground-background,
+.main-home-homeHeader,
+.main-topBar-background,
+.main-topBar-overlay,
+.main-view-container__scroll-node-child-blinder,
+.main-trackList-trackListHeader,
+.main-trackList-trackListHeaderStuck {
+    background-color: transparent !important;
+    background-image: none !important;
+    background: transparent !important;
+    opacity: 0 !important;
+    box-shadow: none !important;
+}
+
+/* 左右側邊欄 (資料庫 & 正在播放) 變成半透明，才不會看不清楚字 */
+.main-yourLibraryX-entryPoints,
+.main-yourLibraryX-background,
+.main-nowPlayingView-contextItemInfo,
+.main-nowPlayingView-section,
+.main-nowPlayingView-aboutArtistV2,
+.main-nowPlayingView-content {
+    background-color: rgba(0, 0, 0, 0.6) !important;
+    background: rgba(0, 0, 0, 0.6) !important;
+    border-radius: 8px !important;
+}
+
+/* 確保側邊欄底層透明 */
+.main-yourLibraryX,
+.Root__right-sidebar aside {
+    background-color: transparent !important;
+    background: transparent !important;
+}
+
+/* 底部播放控制列 */
+.main-nowPlayingBar-container {
+    background-color: rgba(0, 0, 0, 0.7) !important; 
+    border-top: none !important;
+}
+
+/* 隱藏滾動條 */
+.os-scrollbar {
+    display: none !important;
+}
+
+/* 讓卡片有點半透明 */
+.main-card-card {
+    background-color: rgba(0, 0, 0, 0.5) !important;
+    box-shadow: none !important;
+}
+
+/* 滑過歌曲時的亮光 */
+.main-trackList-trackListRow:hover {
+    background-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+/* 確保歌詞背景透明 */
+.lyrics-lyrics-background {
+    background-color: transparent !important;
+    background: transparent !important;
+}
