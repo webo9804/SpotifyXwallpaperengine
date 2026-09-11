@@ -3,16 +3,39 @@ const fs = require("fs");
 const path = require("path");
 const { execSync, exec } = require("child_process");
 const crypto = require("crypto");
-
-const WE_CONFIG = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine\\config.json";
 const PORT = 8989;
+
+function getWEConfigPath() {
+    let base = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine";
+    try {
+        const out = execSync('reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 431960" /v InstallLocation', { encoding: 'utf-8' });
+        const match = out.match(/InstallLocation\s+REG_SZ\s+(.+)/i);
+        if (match && match[1]) {
+            base = match[1].trim();
+        }
+    } catch (e) {
+        // Fallback to default
+    }
+    return path.join(base, "config.json");
+}
 
 function getCurrentWallpaper() {
     try {
-        const raw = fs.readFileSync(WE_CONFIG, "utf-8");
+        const raw = fs.readFileSync(getWEConfigPath(), "utf-8");
         const config = JSON.parse(raw);
-        const file = config.webbe.general.wallpaperconfig.selectedwallpapers.Monitor0.file;
-        return file.replace(/\//g, "\\");
+        
+        // Dynamically find the user profile (e.g., config.webbe, config.admin, etc.)
+        for (const key in config) {
+            if (config[key] && config[key].general && config[key].general.wallpaperconfig) {
+                const wallpapers = config[key].general.wallpaperconfig.selectedwallpapers;
+                // Get the first monitor's wallpaper, or fallback to Monitor0
+                const monitorKey = Object.keys(wallpapers)[0] || 'Monitor0';
+                if (wallpapers[monitorKey] && wallpapers[monitorKey].file) {
+                    return wallpapers[monitorKey].file.replace(/\//g, "\\");
+                }
+            }
+        }
+        return "";
     } catch (e) {
         return "";
     }
