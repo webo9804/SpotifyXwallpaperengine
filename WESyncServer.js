@@ -5,6 +5,20 @@ const { execSync, exec } = require("child_process");
 const crypto = require("crypto");
 const PORT = 8989;
 
+// Track if Wallpaper Engine is currently running
+let isWeRunningCache = false;
+function checkWeRunning() {
+    exec('tasklist | findstr /i "wallpaper32.exe wallpaper64.exe ui32.exe"', (err, stdout) => {
+        isWeRunningCache = !!stdout && stdout.trim().length > 0;
+    });
+}
+// Check every 10 seconds
+setInterval(checkWeRunning, 10000);
+checkWeRunning();
+
+// Track ongoing transcoding jobs to prevent duplicate work
+const transcodingJobs = new Map();
+
 function getWEConfigPath() {
     let base = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine";
     try {
@@ -28,6 +42,8 @@ function getCurrentWallpaper() {
         for (const key in config) {
             if (config[key] && config[key].general && config[key].general.wallpaperconfig) {
                 const wallpapers = config[key].general.wallpaperconfig.selectedwallpapers;
+                // Guard against null/undefined wallpapers
+                if (!wallpapers || typeof wallpapers !== 'object') continue;
                 // Get the first monitor's wallpaper, or fallback to Monitor0
                 const monitorKey = Object.keys(wallpapers)[0] || 'Monitor0';
                 if (wallpapers[monitorKey] && wallpapers[monitorKey].file) {
@@ -39,6 +55,62 @@ function getCurrentWallpaper() {
     } catch (e) {
         return "";
     }
+}
+
+function ensureCacheDir() {
+    const cacheDir = path.join(require('os').tmpdir(), "spotify_we_cache");
+    if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true });
+    }
+    return cacheDir;
+}
+
+function transcodeVideo(wp, cacheDir) {
+    const hash = crypto.createHash('md5').update(wp).digest('hex');
+    const cachedWebm = path.join(cacheDir, `${hash}.webm`);
+    const tmpWebm = path.join(cacheDir, `${hash}.webm.tmp`);
+
+    // If already cached and valid, return immediately
+    if (fs.existsSync(cachedWebm)) {
+        const stat = fs.statSync(cachedWebm);
+        if (stat.size > 0) {
+            return Promise.resolve(cachedWebm);
+        }
+        // Remove corrupt cache
+        fs.unlinkSync(cachedWebm);
+    }
+
+    // If already transcoding this file, return the existing promise (prevent duplicates)
+    if (transcodingJobs.has(hash)) {
+        return transcodingJobs.get(hash);
+    }
+
+    const job = new Promise((resolve, reject) => {
+        console.log(`Transcoding ${wp} to WebM...`);
+        // Output to .tmp file first, force webm format with -f webm
+        exec(`ffmpeg -y -i "${wp}" -t 60 -vf "scale=-1:'min(1080,ih)'" -r 30 -c:v libvpx -b:v 8M -crf 12 -cpu-used 5 -threads 8 -c:a libvorbis -f webm "${tmpWebm}"`, (error, stdout, stderr) => {
+            transcodingJobs.delete(hash);
+            if (error) {
+                if (fs.existsSync(tmpWebm)) {
+                    try { fs.unlinkSync(tmpWebm); } catch(e) {}
+                }
+                reject(error);
+            } else {
+                try {
+                    // Rename .tmp to .webm only when completely finished
+                    if (fs.existsSync(tmpWebm)) {
+                        fs.renameSync(tmpWebm, cachedWebm);
+                    }
+                    resolve(cachedWebm);
+                } catch(e) {
+                    reject(e);
+                }
+            }
+        });
+    });
+
+    transcodingJobs.set(hash, job);
+    return job;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -54,8 +126,28 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    if (req.url.startsWith("/video")) {
-        const wp = getCurrentWallpaper();
+    if (req.url.startsWith("/media") || req.url.startsWith("/video")) {
+        let wp = "";
+        
+        // 1. Try Wallpaper Engine first
+        if (isWeRunningCache) {
+            wp = getCurrentWallpaper();
+        }
+        
+        // 2. Fallback to Windows Desktop Wallpaper
+        if (!wp || !fs.existsSync(wp)) {
+            try {
+                const out = execSync('reg query "HKCU\\Control Panel\\Desktop" /v Wallpaper', { encoding: 'utf-8' });
+                const match = out.match(/Wallpaper\s+REG_SZ\s+(.+)/i);
+                if (match && match[1]) {
+                    const wpPath = match[1].trim();
+                    if (fs.existsSync(wpPath)) {
+                        wp = wpPath;
+                    }
+                }
+            } catch (e) {}
+        }
+
         if (!wp) {
             res.writeHead(404);
             res.end("No wallpaper found");
@@ -63,73 +155,72 @@ const server = http.createServer(async (req, res) => {
         }
 
         const ext = path.extname(wp).toLowerCase();
+        
+        // If it's an image, serve it directly
+        if (ext.match(/\.(jpg|jpeg|png|bmp|webp|gif)$/)) {
+            try {
+                const stat = fs.statSync(wp);
+                res.writeHead(200, {
+                    "Content-Type": "image/" + (ext === '.jpg' ? 'jpeg' : ext.substring(1)),
+                    "Content-Length": stat.size
+                });
+                fs.createReadStream(wp).pipe(res);
+            } catch (e) {
+                if (!res.headersSent) {
+                    res.writeHead(500);
+                    res.end("Failed to serve image");
+                }
+            }
+            return;
+        }
+
+        // If it's unsupported
         if (ext === '.pkg' || ext === '.html' || ext === '.exe') {
             res.writeHead(400);
             res.end("Unsupported format");
             return;
         }
 
-        const cacheDir = path.join(require('os').tmpdir(), "spotify_we_cache");
-        if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
-        
-        const hash = crypto.createHash('md5').update(wp).digest('hex');
-        const cachedWebm = path.join(cacheDir, `${hash}.webm`);
-        const tmpWebm = path.join(cacheDir, `${hash}.webm.tmp`);
+        // Otherwise, assume video and transcode
+        try {
+            const cacheDir = ensureCacheDir();
+            const cachedWebm = await transcodeVideo(wp, cacheDir);
 
-        if (!fs.existsSync(cachedWebm)) {
-            try {
-                console.log(`Transcoding ${wp} to WebM...`);
-                await new Promise((resolve, reject) => {
-                    // Output to .tmp file first, force webm format with -f webm
-                    exec(`ffmpeg -y -i "${wp}" -t 60 -vf "scale=-1:'min(1080,ih)'" -r 30 -c:v libvpx -b:v 8M -crf 12 -cpu-used 5 -threads 8 -c:a libvorbis -f webm "${tmpWebm}"`, (error, stdout, stderr) => {
-                        if (error) {
-                            reject(error);
-                        } else {
-                            // Rename .tmp to .webm only when completely finished
-                            if (fs.existsSync(tmpWebm)) {
-                                fs.renameSync(tmpWebm, cachedWebm);
-                            }
-                            resolve();
-                        }
-                    });
-                });
-            } catch(e) {
-                console.error("FFmpeg error:", e);
-                if (fs.existsSync(tmpWebm)) fs.unlinkSync(tmpWebm);
+            const stat = fs.statSync(cachedWebm);
+
+            if (stat.size === 0) {
+                fs.unlinkSync(cachedWebm);
                 res.writeHead(500);
-                res.end("FFmpeg transcoding failed");
+                res.end("Corrupt cache file deleted");
                 return;
             }
-        }
+            
+            res.setHeader("Content-Type", "video/webm");
+            res.setHeader("Accept-Ranges", "bytes");
 
-        const stat = fs.statSync(cachedWebm);
+            const range = req.headers.range;
 
-        if (stat.size === 0) {
-            fs.unlinkSync(cachedWebm);
-            res.writeHead(500);
-            res.end("Corrupt cache file deleted");
-            return;
-        }
-        
-        res.setHeader("Content-Type", "video/webm");
-        res.setHeader("Accept-Ranges", "bytes");
+            if (range) {
+                const parts = range.replace(/bytes=/, "").split("-");
+                const start = parseInt(parts[0], 10);
+                const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+                const chunkSize = end - start + 1;
 
-        const range = req.headers.range;
-
-        if (range) {
-            const parts = range.replace(/bytes=/, "").split("-");
-            const start = parseInt(parts[0], 10);
-            const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
-            const chunkSize = end - start + 1;
-
-            res.writeHead(206, {
-                "Content-Range": `bytes ${start}-${end}/${stat.size}`,
-                "Content-Length": chunkSize
-            });
-            fs.createReadStream(cachedWebm, { start, end }).pipe(res);
-        } else {
-            res.writeHead(200, { "Content-Length": stat.size });
-            fs.createReadStream(cachedWebm).pipe(res);
+                res.writeHead(206, {
+                    "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+                    "Content-Length": chunkSize
+                });
+                fs.createReadStream(cachedWebm, { start, end }).pipe(res);
+            } else {
+                res.writeHead(200, { "Content-Length": stat.size });
+                fs.createReadStream(cachedWebm).pipe(res);
+            }
+        } catch(e) {
+            console.error("Video serving error:", e);
+            if (!res.headersSent) {
+                res.writeHead(500);
+                res.end("FFmpeg transcoding failed");
+            }
         }
         return;
     }
@@ -138,6 +229,36 @@ const server = http.createServer(async (req, res) => {
     res.end();
 });
 
+// Handle port already in use — wait and retry instead of crashing
+let retryCount = 0;
+const MAX_RETRIES = 5;
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        retryCount++;
+        if (retryCount > MAX_RETRIES) {
+            console.error(`Port ${PORT} still in use after ${MAX_RETRIES} retries. Exiting (loop will restart).`);
+            process.exit(1);
+        }
+        console.error(`Port ${PORT} is already in use. Retry ${retryCount}/${MAX_RETRIES} in 15 seconds...`);
+        setTimeout(() => {
+            try { server.close(); } catch(e) {}
+            server.listen(PORT, "127.0.0.1");
+        }, 15000);
+    } else {
+        console.error('Server error:', err);
+    }
+});
+
 server.listen(PORT, "127.0.0.1", () => {
+    retryCount = 0;
     console.log("WESync Server running on http://127.0.0.1:" + PORT);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection:', reason);
 });
