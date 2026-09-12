@@ -49,28 +49,33 @@ html,
     box-shadow: none !important;
 }
 
-/* 左右側邊欄 (資料庫 & 正在播放) 變成半透明，才不會看不清楚字 */
+/* 左側選單背景與區塊 (讓背景可以透過去，但保留一點深色底幫助閱讀) */
 .main-yourLibraryX-entryPoints,
 .main-yourLibraryX-background,
+.main-yourLibraryX-libraryContainer,
+.main-yourLibraryX-libraryIsCollapsed,
+.main-yourLibraryX-isCollapsed,
+.main-yourLibraryX-library,
 .main-nowPlayingView-contextItemInfo,
 .main-nowPlayingView-section,
 .main-nowPlayingView-aboutArtistV2,
 .main-nowPlayingView-content {
-    background-color: rgba(0, 0, 0, 0.6) !important;
-    background: rgba(0, 0, 0, 0.6) !important;
+    background-color: rgba(0, 0, 0, 0.2) !important;
+    background: rgba(0, 0, 0, 0.2) !important;
     border-radius: 8px !important;
 }
 
-/* 確保側邊欄底層透明 */
+/* 右側面板與其他透明區塊 */
 .main-yourLibraryX,
+.Root__nav-bar,
 .Root__right-sidebar aside {
     background-color: transparent !important;
     background: transparent !important;
 }
 
-/* 底部播放控制列 */
+/* 底部播放條 (稍微透明) */
 .main-nowPlayingBar-container {
-    background-color: rgba(0, 0, 0, 0.7) !important; 
+    background-color: rgba(0, 0, 0, 0.4) !important; 
     border-top: none !important;
 }
 

@@ -56,10 +56,21 @@ set "PATH=%SYS_PATH%;%USR_PATH%;%PATH%"
 :: ==========================================
 :: Step 1: Install Background Server
 :: ==========================================
+:: Prevent running directly from ZIP
+if not exist "%~dp0WESyncServer.js" (
+    echo [ERROR] Files are missing! Did you forget to extract the ZIP?
+    echo Please EXTRACT the ZIP file to a normal folder first, then run install.bat.
+    pause
+    exit /b
+)
+
 echo [1/4] Installing background server...
+mkdir "%APPDATA%\WESync" 2>nul
+copy /y "%~dp0WESyncServer.js" "%APPDATA%\WESync\" >nul
 
 :: Kill existing server and loop processes if running
 taskkill /f /fi "WINDOWTITLE eq WESyncServer_Loop" >nul 2>nul
+taskkill /f /im node.exe >nul 2>nul
 wmic process where "name='node.exe' and commandline like '%%WESyncServer%%'" call terminate >nul 2>nul
 wmic process where "name='cmd.exe' and commandline like '%%WESyncServer_Loop%%'" call terminate >nul 2>nul
 
@@ -69,42 +80,76 @@ timeout /t 2 /nobreak >nul
 :: Clear old cache to avoid corrupted video issues from previous versions
 rmdir /s /q "%TEMP%\spotify_we_cache" 2>nul
 
-:: Copy server file
-mkdir "%USERPROFILE%\Documents\WESync" 2>nul
-copy /Y "WESyncServer.js" "%USERPROFILE%\Documents\WESync\WESyncServer.js" >nul
+:: Resolve absolute paths to avoid PATH environment issues
+set "NODE_EXE="
+for /f "delims=" %%I in ('where node 2^>nul') do (
+    set "NODE_EXE=%%I"
+    goto :found_node
+)
+:found_node
+if "%NODE_EXE%"=="" (
+    if exist "C:\Program Files\nodejs\node.exe" (
+        set "NODE_EXE=C:\Program Files\nodejs\node.exe"
+    ) else (
+        set "NODE_EXE=node"
+    )
+)
+
+set "FFMPEG_EXE="
+for /f "delims=" %%I in ('where ffmpeg 2^>nul') do (
+    set "FFMPEG_EXE=%%I"
+    goto :found_ffmpeg
+)
+:found_ffmpeg
+if "%FFMPEG_EXE%"=="" (
+    if exist "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe" (
+        for /f "delims=" %%F in ('dir /s /b "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg.exe" 2^>nul') do (
+            set "FFMPEG_EXE=%%F"
+            goto :found_ffmpeg_search
+        )
+    )
+)
+:found_ffmpeg_search
+if "%FFMPEG_EXE%"=="" (
+    set "FFMPEG_EXE=ffmpeg"
+)
 
 :: Create a robust restart loop script that auto-recovers from crashes
-:: The loop checks if the .js file still exists (deleted = uninstalled, stop looping)
-set "LOOP_BAT=%USERPROFILE%\Documents\WESync\WESyncServer_Loop.bat"
+set "LOOP_BAT=%APPDATA%\WESync\WESyncServer_Loop.bat"
 (
     echo @echo off
     echo :loop
-    echo if not exist "%%USERPROFILE%%\Documents\WESync\WESyncServer.js" exit /b
-    echo node "%%USERPROFILE%%\Documents\WESync\WESyncServer.js"
+    echo if not exist "%%APPDATA%%\WESync\WESyncServer.js" exit /b
+    echo set "FFMPEG_PATH=%FFMPEG_EXE%"
+    echo "%NODE_EXE%" "%%APPDATA%%\WESync\WESyncServer.js"
     echo timeout /t 10 /nobreak ^>nul
     echo goto loop
 ) > "%LOOP_BAT%"
 
 :: Generate VBS startup script using the ACTUAL resolved path (not env vars)
-:: This avoids VBS failing to expand %%USERPROFILE%% at runtime
+:: This avoids VBS failing to expand %%APPDATA%% at runtime
 set "VBS_PATH=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\StartWESyncServer.vbs"
 echo Set objShell = CreateObject("WScript.Shell") > "%VBS_PATH%"
-echo objShell.Run "cmd /c ""%USERPROFILE%\Documents\WESync\WESyncServer_Loop.bat""", 0, False >> "%VBS_PATH%"
+echo objShell.Run "cmd /c ""%APPDATA%\WESync\WESyncServer_Loop.bat""", 0, False >> "%VBS_PATH%"
 
 :: ==========================================
 :: Step 2: Install Spicetify Extension
 :: ==========================================
 echo [2/4] Installing Spicetify Extension...
 if not exist "%APPDATA%\spicetify\Extensions" mkdir "%APPDATA%\spicetify\Extensions"
-copy /Y "we-sync.js" "%APPDATA%\spicetify\Extensions\we-sync.js" >nul
+copy /Y "%~dp0we-sync.js" "%APPDATA%\spicetify\Extensions\we-sync.js" >nul
+
+:: Block Spotify Auto-Updates to prevent Spicetify from being wiped
+mkdir "%LOCALAPPDATA%\Spotify\Update" 2>nul
+icacls "%LOCALAPPDATA%\Spotify\Update" /deny "%username%":W >nul 2>nul
 
 :: ==========================================
 :: Step 3: Install Spicetify Theme
 :: ==========================================
 echo [3/4] Installing Spicetify Theme...
 if not exist "%APPDATA%\spicetify\Themes\TransparentTheme" mkdir "%APPDATA%\spicetify\Themes\TransparentTheme"
-copy /Y "user.css" "%APPDATA%\spicetify\Themes\TransparentTheme\user.css" >nul
-copy /Y "color.ini" "%APPDATA%\spicetify\Themes\TransparentTheme\color.ini" >nul
+copy /Y "%~dp0user.css" "%APPDATA%\spicetify\Themes\TransparentTheme\user.css" >nul
+copy /Y "%~dp0color.ini" "%APPDATA%\spicetify\Themes\TransparentTheme\color.ini" >nul
 
 :: ==========================================
 :: Step 4: Apply Spicetify Settings
@@ -119,14 +164,14 @@ spicetify config inject_css 1 replace_colors 1 overwrite_assets 1
 echo [INFO] Restarting Spotify to apply changes...
 taskkill /f /im spotify.exe >nul 2>nul
 timeout /t 2 /nobreak >nul
-spicetify apply
+spicetify apply || spicetify backup apply
 
 :: ==========================================
 :: Start server for the first time
 :: ==========================================
 echo.
 echo Starting background server for the first time...
-start "" "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\StartWESyncServer.vbs"
+wscript "%VBS_PATH%"
 
 echo.
 echo ==========================================

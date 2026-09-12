@@ -19,15 +19,17 @@ if /i not "%CONFIRM%"=="Y" (
 )
 
 echo.
-echo [1/4] Stopping background server...
+echo [1/4] Stopping background server and Spotify...
 taskkill /f /fi "WINDOWTITLE eq WESyncServer_Loop" >nul 2>nul
+taskkill /f /im node.exe >nul 2>nul
+taskkill /f /im spotify.exe >nul 2>nul
 wmic process where "name='node.exe' and commandline like '%%WESyncServer%%'" call terminate >nul 2>nul
 wmic process where "name='cmd.exe' and commandline like '%%WESyncServer_Loop%%'" call terminate >nul 2>nul
 :: Wait for processes to fully terminate
 timeout /t 2 /nobreak >nul
 
 echo [2/4] Removing background server files and cache...
-rmdir /s /q "%USERPROFILE%\Documents\WESync" 2>nul
+rmdir /s /q "%APPDATA%\WESync" 2>nul
 del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\StartWESyncServer.vbs" 2>nul
 rmdir /s /q "%TEMP%\spotify_we_cache" 2>nul
 

@@ -19,7 +19,27 @@ checkWeRunning();
 // Track ongoing transcoding jobs to prevent duplicate work
 const transcodingJobs = new Map();
 
+let cachedWeConfigPath = null;
+let cachedWindowsWallpaper = null;
+
+function updateWindowsWallpaper() {
+    exec('reg query "HKCU\\Control Panel\\Desktop" /v Wallpaper', (err, stdout) => {
+        if (!err && stdout) {
+            const match = stdout.match(/Wallpaper\s+REG_SZ\s+(.+)/i);
+            if (match && match[1]) {
+                const wpPath = match[1].trim();
+                if (fs.existsSync(wpPath)) {
+                    cachedWindowsWallpaper = wpPath;
+                }
+            }
+        }
+    });
+}
+setInterval(updateWindowsWallpaper, 10000);
+updateWindowsWallpaper();
+
 function getWEConfigPath() {
+    if (cachedWeConfigPath) return cachedWeConfigPath;
     let base = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine";
     try {
         const out = execSync('reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 431960" /v InstallLocation', { encoding: 'utf-8' });
@@ -30,7 +50,8 @@ function getWEConfigPath() {
     } catch (e) {
         // Fallback to default
     }
-    return path.join(base, "config.json");
+    cachedWeConfigPath = path.join(base, "config.json");
+    return cachedWeConfigPath;
 }
 
 function getCurrentWallpaper() {
@@ -58,11 +79,27 @@ function getCurrentWallpaper() {
 }
 
 function ensureCacheDir() {
-    const cacheDir = path.join(require('os').tmpdir(), "spotify_we_cache");
-    if (!fs.existsSync(cacheDir)) {
-        fs.mkdirSync(cacheDir, { recursive: true });
+    const tempDir = path.join(require('os').tmpdir(), 'spotify_we_cache');
+    if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+    } else {
+        // Auto-cleanup: keep only the 10 most recent cached videos to prevent storage bloat
+        try {
+            const files = fs.readdirSync(tempDir)
+                .filter(f => f.endsWith('.webm'))
+                .map(f => ({ name: f, time: fs.statSync(path.join(tempDir, f)).mtime.getTime() }))
+                .sort((a, b) => b.time - a.time);
+                
+            if (files.length > 10) {
+                for (let i = 10; i < files.length; i++) {
+                    fs.unlinkSync(path.join(tempDir, files[i].name));
+                }
+            }
+        } catch (e) {
+            console.error("Cache cleanup error:", e);
+        }
     }
-    return cacheDir;
+    return tempDir;
 }
 
 function transcodeVideo(wp, cacheDir) {
@@ -87,17 +124,31 @@ function transcodeVideo(wp, cacheDir) {
 
     const job = new Promise((resolve, reject) => {
         console.log(`Transcoding ${wp} to WebM...`);
-        // Output to .tmp file first, force webm format with -f webm
-        exec(`ffmpeg -y -i "${wp}" -t 60 -vf "scale=-1:'min(1080,ih)'" -r 30 -c:v libvpx -b:v 8M -crf 12 -cpu-used 5 -threads 8 -c:a libvorbis -f webm "${tmpWebm}"`, (error, stdout, stderr) => {
+        const ffmpegExe = process.env.FFMPEG_PATH || "ffmpeg";
+        
+        const args = [
+            "-y", "-i", wp,
+            "-t", "60",
+            "-vf", "scale=-1:'min(1080,ih)'",
+            "-r", "30",
+            "-c:v", "libvpx", "-b:v", "8M", "-crf", "12", "-cpu-used", "5", "-threads", "8",
+            "-c:a", "libvorbis",
+            "-f", "webm",
+            tmpWebm
+        ];
+
+        const { spawn } = require("child_process");
+        const ffmpeg = spawn(ffmpegExe, args, { windowsHide: true });
+
+        ffmpeg.on('close', (code) => {
             transcodingJobs.delete(hash);
-            if (error) {
+            if (code !== 0) {
                 if (fs.existsSync(tmpWebm)) {
                     try { fs.unlinkSync(tmpWebm); } catch(e) {}
                 }
-                reject(error);
+                reject(new Error(`FFmpeg exited with code ${code}`));
             } else {
                 try {
-                    // Rename .tmp to .webm only when completely finished
                     if (fs.existsSync(tmpWebm)) {
                         fs.renameSync(tmpWebm, cachedWebm);
                     }
@@ -106,6 +157,14 @@ function transcodeVideo(wp, cacheDir) {
                     reject(e);
                 }
             }
+        });
+
+        ffmpeg.on('error', (err) => {
+            transcodingJobs.delete(hash);
+            if (fs.existsSync(tmpWebm)) {
+                try { fs.unlinkSync(tmpWebm); } catch(e) {}
+            }
+            reject(err);
         });
     });
 
@@ -120,7 +179,15 @@ const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length, Content-Type");
 
     if (req.url.startsWith("/path")) {
-        const wp = getCurrentWallpaper();
+        let wp = "";
+        if (isWeRunningCache) {
+            wp = getCurrentWallpaper();
+        }
+        if (!wp || !fs.existsSync(wp)) {
+            if (cachedWindowsWallpaper && fs.existsSync(cachedWindowsWallpaper)) {
+                wp = cachedWindowsWallpaper;
+            }
+        }
         res.writeHead(200, { "Content-Type": "text/plain" });
         res.end(wp);
         return;
@@ -136,16 +203,9 @@ const server = http.createServer(async (req, res) => {
         
         // 2. Fallback to Windows Desktop Wallpaper
         if (!wp || !fs.existsSync(wp)) {
-            try {
-                const out = execSync('reg query "HKCU\\Control Panel\\Desktop" /v Wallpaper', { encoding: 'utf-8' });
-                const match = out.match(/Wallpaper\s+REG_SZ\s+(.+)/i);
-                if (match && match[1]) {
-                    const wpPath = match[1].trim();
-                    if (fs.existsSync(wpPath)) {
-                        wp = wpPath;
-                    }
-                }
-            } catch (e) {}
+            if (cachedWindowsWallpaper && fs.existsSync(cachedWindowsWallpaper)) {
+                wp = cachedWindowsWallpaper;
+            }
         }
 
         if (!wp) {
