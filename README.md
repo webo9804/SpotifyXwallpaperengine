@@ -44,4 +44,4 @@ If you wish to remove the background sync functionality:
 - **Spicetify**: UI injection and DOM manipulation.
 
 ---
-*Created by bobo & Antigravity*
+*Created by bobo*
