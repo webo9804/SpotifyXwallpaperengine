@@ -1,6 +1,6 @@
 # Spotify x Wallpaper Engine Sync Plugin
 
-**English** | [繁體中文](README.zh-TW.md)
+**English**
 
 Syncs your current **Wallpaper Engine** wallpaper (video or image), or your Windows desktop wallpaper, into the **Spotify desktop client** as a live background, using [Spicetify](https://spicetify.app/).
 
