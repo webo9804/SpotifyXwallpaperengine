@@ -1,0 +1,5 @@
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.js text eol=lf
+*.css text eol=lf
+*.md text eol=lf

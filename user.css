@@ -2,9 +2,10 @@
   --background-base: transparent !important;
   --background-highlight: rgba(255, 255, 255, 0.1) !important;
   --background-press: rgba(255, 255, 255, 0.2) !important;
-  --background-elevated-base: transparent !important;
-  --background-elevated-highlight: rgba(255, 255, 255, 0.1) !important;
-  --background-elevated-press: rgba(255, 255, 255, 0.2) !important;
+  /* 彈窗、右鍵選單與搜尋下拉保留深色半透明底，避免透出底層文字難以閱讀 */
+  --background-elevated-base: rgba(24, 24, 24, 0.92) !important;
+  --background-elevated-highlight: rgba(45, 45, 45, 0.95) !important;
+  --background-elevated-press: rgba(60, 60, 60, 0.95) !important;
   --background-tinted-base: transparent !important;
   --background-tinted-highlight: rgba(255, 255, 255, 0.1) !important;
   --background-tinted-press: rgba(255, 255, 255, 0.2) !important;
@@ -15,6 +16,7 @@ body,
 html,
 #main,
 .Root__top-container,
+.Root__globalNav,
 .Root__nav-block,
 .Root__main-view,
 .Root__now-playing-bar,
@@ -25,7 +27,17 @@ html,
 .os-host,
 .os-padding,
 .os-viewport,
-.os-content {
+.os-content,
+/* Wildcard selectors for different Spotify versions */
+[class*="Root__top"],
+[class*="Root__globalNav"],
+[class*="Root__main"],
+[class*="Root__nav"],
+[class*="Root__now-playing"],
+[class*="Root__right-sidebar"],
+[class*="main-view-container"],
+[class*="Layout__"],
+[class*="mainViewContainer"] {
     background-color: transparent !important;
     background: transparent !important;
     background-image: none !important;
@@ -36,12 +48,9 @@ html,
 .main-entityHeader-overlay,
 .main-entityHeader-backgroundColor,
 .main-actionBarBackground-background,
-.main-home-homeHeader,
 .main-topBar-background,
 .main-topBar-overlay,
-.main-view-container__scroll-node-child-blinder,
-.main-trackList-trackListHeader,
-.main-trackList-trackListHeaderStuck {
+.main-view-container__scroll-node-child-blinder {
     background-color: transparent !important;
     background-image: none !important;
     background: transparent !important;
@@ -49,7 +58,23 @@ html,
     box-shadow: none !important;
 }
 
-/* 左側選單背景與區塊 (讓背景可以透過去，但保留一點深色底幫助閱讀) */
+/* 首頁篩選列與歌曲清單標題列：只透明背景，不要設 opacity: 0 隱藏文字 */
+.main-home-homeHeader,
+.main-trackList-trackListHeader {
+    background-color: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+}
+
+/* 歌單捲動後的固定標題列：保留文字並加微弱半透明毛玻璃提升可讀性 */
+.main-trackList-trackListHeaderStuck {
+    background-color: rgba(0, 0, 0, 0.45) !important;
+    background-image: none !important;
+    backdrop-filter: blur(8px) !important;
+    box-shadow: none !important;
+}
+
+/* 左側選單背景與區塊 (保留一點深色底幫助閱讀) */
 .main-yourLibraryX-entryPoints,
 .main-yourLibraryX-background,
 .main-yourLibraryX-libraryContainer,
@@ -60,8 +85,8 @@ html,
 .main-nowPlayingView-section,
 .main-nowPlayingView-aboutArtistV2,
 .main-nowPlayingView-content {
-    background-color: rgba(0, 0, 0, 0.2) !important;
-    background: rgba(0, 0, 0, 0.2) !important;
+    background-color: rgba(0, 0, 0, 0.25) !important;
+    background: rgba(0, 0, 0, 0.25) !important;
     border-radius: 8px !important;
 }
 
@@ -73,15 +98,27 @@ html,
     background: transparent !important;
 }
 
+/* 右鍵選單與彈窗維持可讀性 */
+[role="menu"],
+[role="dialog"],
+.main-contextMenu-menu {
+    background-color: rgba(24, 24, 24, 0.92) !important;
+    backdrop-filter: blur(12px) !important;
+}
+
 /* 底部播放條 (稍微透明) */
 .main-nowPlayingBar-container {
-    background-color: rgba(0, 0, 0, 0.4) !important; 
+    background-color: rgba(0, 0, 0, 0.4) !important;
     border-top: none !important;
 }
 
-/* 隱藏滾動條 */
-.os-scrollbar {
-    display: none !important;
+/* 改為細版半透明捲軸，保留長歌單拖曳功能 */
+.os-scrollbar-handle {
+    background: rgba(255, 255, 255, 0.25) !important;
+    border-radius: 4px !important;
+}
+.os-scrollbar-handle:hover {
+    background: rgba(255, 255, 255, 0.45) !important;
 }
 
 /* 讓卡片有點半透明 */
@@ -95,8 +132,103 @@ html,
     background-color: rgba(255, 255, 255, 0.15) !important;
 }
 
+/* 淺色桌布下增強主視圖文字可讀性 */
+.Root__main-view {
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+}
+
+/* 避免亮色按鈕上的黑字出現髒陰影 */
+.Root__main-view button,
+.Root__main-view [role="button"] {
+    text-shadow: none;
+}
+
 /* 確保歌詞背景透明 */
 .lyrics-lyrics-background {
     background-color: transparent !important;
     background: transparent !important;
+}
+
+/* ==========================================
+   WESync 亮度遮罩與控制面板
+   ========================================== */
+#wesync-dimmer {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    transition: background-color 0.12s ease;
+}
+
+#wesync-panel {
+    position: fixed;
+    top: 64px;
+    right: 20px;
+    width: 230px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: rgba(20, 20, 24, 0.88) !important;
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #fff;
+    font-size: 13px;
+    z-index: 100000;
+    display: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    text-shadow: none;
+}
+
+#wesync-panel.open {
+    display: block;
+}
+
+.wesync-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+#wesync-reset {
+    background: rgba(255, 255, 255, 0.12);
+    border: none;
+    color: #ddd;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#wesync-reset:hover {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+}
+
+.wesync-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    color: #ccc;
+}
+
+#wesync-slider {
+    width: 100%;
+    accent-color: #1db954;
+    cursor: pointer;
+}
+
+#wesync-fab {
+    position: fixed;
+    right: 20px;
+    bottom: 100px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(20, 20, 24, 0.8);
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+    z-index: 99999;
 }

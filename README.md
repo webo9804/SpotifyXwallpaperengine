@@ -1,6 +1,6 @@
-# Spotify x Wallpaper Engine Sync Plugin
+# SpotifyXwallpaper
 
-**English**
+**English** | [繁體中文](README.zh-TW.md)
 
 Syncs your current **Wallpaper Engine** wallpaper (video or image), or your Windows desktop wallpaper, into the **Spotify desktop client** as a live background, using [Spicetify](https://spicetify.app/).
 
@@ -21,6 +21,7 @@ Syncs your current **Wallpaper Engine** wallpaper (video or image), or your Wind
 - **Real-time sync**: detects your active Wallpaper Engine wallpaper and shows it as the Spotify background.
 - **Automatic fallback**: if Wallpaper Engine is not running, your Windows desktop wallpaper is used instead.
 - **Video and image support**: video wallpapers are transcoded to WebM with FFmpeg and cached; images are served directly.
+- **Brightness Control Panel**: adjust background brightness in real-time directly from Spotify's top bar (or floating action button) and remember your preferences.
 - **Change confirmation**: when your wallpaper changes, Spotify asks whether to sync the new one. You can keep the current background.
 - **Automatic cache cleanup**: only the 10 most recent transcoded videos are kept, and stale temp files are removed.
 - **Transparent theme**: keeps Spotify's UI and text readable on top of the background.
@@ -44,10 +45,10 @@ Syncs your current **Wallpaper Engine** wallpaper (video or image), or your Wind
 
 ### Verify your download (recommended)
 
-Run this in PowerShell and compare the result with the SHA256 published on the Release page:
+Run this in PowerShell and compare the result with the SHA256 published on the Release page (replace the filename if you downloaded a different release):
 
 ```powershell
-Get-FileHash .\Spotify_WESync_Plugin_Release_Fixed_v2.zip -Algorithm SHA256
+Get-FileHash .\SpotifyXwallpaper.zip -Algorithm SHA256
 ```
 
 ## 🗑️ Uninstall / Update
@@ -106,4 +107,4 @@ Node.js (local server), FFmpeg (VP8/WebM transcoding), Spicetify (UI injection).
 
 ---
 
-*Created by bobo*
+*Created by bobo · [MIT License](LICENSE)*
