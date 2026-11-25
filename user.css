@@ -9,6 +9,7 @@
   --background-tinted-base: transparent !important;
   --background-tinted-highlight: rgba(255, 255, 255, 0.1) !important;
   --background-tinted-press: rgba(255, 255, 255, 0.2) !important;
+  --lyrics-color-background: transparent !important;
 }
 
 /* 核心容器全透明 */
@@ -50,7 +51,8 @@ html,
 .main-actionBarBackground-background,
 .main-topBar-background,
 .main-topBar-overlay,
-.main-view-container__scroll-node-child-blinder {
+.main-view-container__scroll-node-child-blinder,
+.under-main-view {
     background-color: transparent !important;
     background-image: none !important;
     background: transparent !important;
@@ -144,31 +146,34 @@ html,
 }
 
 /* 確保歌詞背景透明 */
-.lyrics-lyrics-background {
+.lyrics-lyrics-background,
+.lyrics-lyrics-container,
+.lyrics-lyrics-contentContainer,
+[data-testid="lyrics-page"] {
     background-color: transparent !important;
     background: transparent !important;
 }
 
 /* ==========================================
-   WESync 亮度遮罩與控制面板
+   WESync 亮度與模糊遮罩、控制面板
    ========================================== */
 #wesync-dimmer {
     position: fixed;
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    transition: background-color 0.12s ease;
+    transition: background-color 0.12s ease, backdrop-filter 0.12s ease;
 }
 
 #wesync-panel {
     position: fixed;
     top: 64px;
     right: 20px;
-    width: 230px;
+    width: 244px;
     padding: 14px 16px;
     border-radius: 10px;
-    background: rgba(20, 20, 24, 0.88) !important;
-    backdrop-filter: blur(12px);
+    background: rgba(20, 20, 24, 0.9) !important;
+    backdrop-filter: blur(14px);
     border: 1px solid rgba(255, 255, 255, 0.14);
     color: #fff;
     font-size: 13px;
@@ -176,6 +181,12 @@ html,
     display: none;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
     text-shadow: none;
+}
+
+#wesync-panel.wesync-panel-bottom {
+    top: auto;
+    bottom: 146px;
+    right: 20px;
 }
 
 #wesync-panel.open {
@@ -186,7 +197,7 @@ html,
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     font-weight: 600;
 }
 
@@ -208,14 +219,38 @@ html,
 .wesync-row {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     color: #ccc;
+    font-size: 12px;
 }
 
-#wesync-slider {
+.wesync-slider {
     width: 100%;
     accent-color: #1db954;
     cursor: pointer;
+    margin-bottom: 10px;
+}
+
+#wesync-resync {
+    width: 100%;
+    margin-top: 2px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(29, 185, 84, 0.45);
+    background: rgba(29, 185, 84, 0.16);
+    color: #1ed760;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+#wesync-resync:hover {
+    background: rgba(29, 185, 84, 0.28);
+}
+
+#wesync-resync:active {
+    transform: scale(0.98);
 }
 
 #wesync-fab {
@@ -224,11 +259,22 @@ html,
     bottom: 100px;
     width: 36px;
     height: 36px;
+    padding: 0;
     border-radius: 50%;
     border: 1px solid rgba(255, 255, 255, 0.2);
     background: rgba(20, 20, 24, 0.8);
     color: #fff;
     font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     z-index: 99999;
+    backdrop-filter: blur(10px);
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+#wesync-fab:hover {
+    background: rgba(40, 40, 46, 0.92);
+    transform: scale(1.06);
 }

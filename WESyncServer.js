@@ -128,17 +128,19 @@ let cachedWeConfigPath = null;
 let cachedWeConfigTime = 0;
 
 function _resolveWEConfigPath() {
-    let wePath = "";
     // 1. Try Wallpaper Engine registry (chcp 65001 to prevent Chinese garbled path)
     try {
         const stdout = require('child_process').execSync('chcp 65001 >nul && reg query "HKCU\\Software\\WallpaperEngine" /v installPath', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
         const match = stdout.match(/installPath\s+REG_SZ\s+(.+)/i);
         if (match && match[1]) {
-            wePath = path.dirname(match[1].trim());
-            const testPath = path.join(wePath, "config.json");
-            if (fs.existsSync(testPath)) {
-                log("Found WE path from WE registry: " + testPath);
-                return testPath;
+            const rawInstall = match[1].trim();
+            const candidates = [rawInstall, path.dirname(rawInstall)];
+            for (const dir of candidates) {
+                const testPath = path.join(dir, "config.json");
+                if (fs.existsSync(testPath)) {
+                    log("Found WE path from WE registry: " + testPath);
+                    return testPath;
+                }
             }
         }
     } catch (e) {}
@@ -340,10 +342,17 @@ function ensureCacheDir() {
                 } catch(e) {}
             });
 
-            // Keep only 10 recent .webm files
+            // Keep only 10 recent .webm files (LRU)
             const webmFiles = allFiles
                 .filter(f => f.endsWith('.webm'))
-                .map(f => ({ name: f, time: fs.statSync(path.join(tempDir, f)).mtime.getTime() }))
+                .map(f => {
+                    try {
+                        return { name: f, time: fs.statSync(path.join(tempDir, f)).mtime.getTime() };
+                    } catch (e) {
+                        return null;
+                    }
+                })
+                .filter(Boolean)
                 .sort((a, b) => b.time - a.time);
                 
             if (webmFiles.length > 10) {
@@ -369,12 +378,18 @@ function transcodeVideo(wp, cacheDir) {
     const cachedWebm = path.join(cacheDir, `${hash}.webm`);
     const tmpWebm = path.join(cacheDir, `${hash}.webm.tmp`);
 
-    // If already cached and valid, return immediately
+    // If already cached and valid, refresh mtime for LRU and return immediately
     if (fs.existsSync(cachedWebm)) {
-        const stat = fs.statSync(cachedWebm);
-        if (stat.size > 0) {
-            return Promise.resolve(cachedWebm);
-        }
+        try {
+            const stat = fs.statSync(cachedWebm);
+            if (stat.size > 0) {
+                try {
+                    const now = new Date();
+                    fs.utimesSync(cachedWebm, now, now);
+                } catch (e) {}
+                return Promise.resolve(cachedWebm);
+            }
+        } catch (e) {}
         // Remove corrupt cache
         try { fs.unlinkSync(cachedWebm); } catch (e) {}
     }

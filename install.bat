@@ -70,7 +70,7 @@ if exist "%LOCALAPPDATA%\spicetify\spicetify.exe" (
 where spicetify >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
     echo [INFO] Spicetify is not installed. Automatically installing Spicetify...
-    powershell -Command "iwr -useb https://raw.githubusercontent.com/spicetify/cli/main/install.ps1 | iex"
+    powershell -NoProfile -Command "iwr -useb https://raw.githubusercontent.com/spicetify/cli/main/install.ps1 | iex"
     set "PATH=%PATH%;%LOCALAPPDATA%\spicetify"
 )
 

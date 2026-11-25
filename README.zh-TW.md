@@ -21,7 +21,8 @@
 - **即時同步**：偵測目前的 Wallpaper Engine 桌布並顯示在 Spotify 背景。
 - **自動回退**：沒有執行 Wallpaper Engine 時，改用 Windows 桌布。
 - **支援影片與圖片**：影片桌布會用 FFmpeg 轉成 WebM 並快取，圖片直接顯示。
-- **背景亮度調節**：可從 Spotify 頂部列（或右下角浮動按鈕）開啟設定面板，即時調整背景亮度並自動儲存設定。
+- **背景設定面板**：可從 Spotify 頂部列（或右下角浮動按鈕）開啟控制面板，即時調整背景亮度、毛玻璃模糊度，並支援一鍵重新同步目前桌布與自動記憶設定。
+- **自動雙語介面**：會依據 Spotify / 系統語言自動切換繁體中文或英文提示。
 - **更換確認**：桌布變更時，Spotify 會詢問是否同步，也可以選擇保持原樣。
 - **自動清理快取**：只保留最近 10 部轉檔影片，過期暫存檔會自動刪除。
 - **透明化佈景**：保留 Spotify 介面與文字可讀性。
@@ -78,7 +79,7 @@ Get-FileHash .\SpotifyXwallpaper.zip -Algorithm SHA256
 ## ⚠️ 已知限制
 
 - 多螢幕時只同步**第一個螢幕**的桌布。
-- 只支援影片（mp4、webm、avi、mkv、mov）與圖片（jpg、png、bmp、webp、gif）；Wallpaper Engine 的網頁類、應用程式類桌布不支援。
+- 只支援影片（mp4、webm、avi、mkv、mov、m4v）與圖片（jpg、png、bmp、webp、gif）；Wallpaper Engine 的網頁類、應用程式類桌布不支援。
 - 影片以軟體編碼轉成最高 1080p、30 fps，首次轉檔高畫質桌布可能需要數十秒。
 - Spotify 更新後 Spicetify 可能失效，需重新執行 `install.bat`。
 

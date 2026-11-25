@@ -21,7 +21,8 @@ Syncs your current **Wallpaper Engine** wallpaper (video or image), or your Wind
 - **Real-time sync**: detects your active Wallpaper Engine wallpaper and shows it as the Spotify background.
 - **Automatic fallback**: if Wallpaper Engine is not running, your Windows desktop wallpaper is used instead.
 - **Video and image support**: video wallpapers are transcoded to WebM with FFmpeg and cached; images are served directly.
-- **Brightness Control Panel**: adjust background brightness in real-time directly from Spotify's top bar (or floating action button) and remember your preferences.
+- **Background Settings Panel**: adjust background brightness and blur (frosted glass) in real-time from Spotify's top bar (or floating button), with a one-click resync option and persistent preferences.
+- **Bilingual UI**: automatically displays Traditional Chinese or English based on your Spotify/system language.
 - **Change confirmation**: when your wallpaper changes, Spotify asks whether to sync the new one. You can keep the current background.
 - **Automatic cache cleanup**: only the 10 most recent transcoded videos are kept, and stale temp files are removed.
 - **Transparent theme**: keeps Spotify's UI and text readable on top of the background.
@@ -78,7 +79,7 @@ Install locations: `%APPDATA%\WESync\` (server and log), `%APPDATA%\spicetify\` 
 ## ⚠️ Known limitations
 
 - With multiple monitors, only the **first monitor's** wallpaper is synced.
-- Supported formats are video (mp4, webm, avi, mkv, mov) and image (jpg, png, bmp, webp, gif). Wallpaper Engine web and application wallpapers are not supported.
+- Supported formats are video (mp4, webm, avi, mkv, mov, m4v) and image (jpg, png, bmp, webp, gif). Wallpaper Engine web and application wallpapers are not supported.
 - Video is software-encoded to at most 1080p at 30 fps. The first transcode of a high-resolution wallpaper can take a few tens of seconds.
 - After a Spotify update, Spicetify may stop working and you may need to re-run `install.bat`.
 
