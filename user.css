@@ -169,7 +169,7 @@ html,
     position: fixed;
     top: 64px;
     right: 20px;
-    width: 244px;
+    width: 264px;
     padding: 14px 16px;
     border-radius: 10px;
     background: rgba(20, 20, 24, 0.9) !important;
@@ -229,6 +229,68 @@ html,
     accent-color: #1db954;
     cursor: pointer;
     margin-bottom: 10px;
+}
+
+.wesync-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 2px 0 10px;
+}
+
+.wesync-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+    color: #d4d4d8;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.wesync-switch {
+    position: relative;
+    display: inline-block;
+    width: 34px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.wesync-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.wesync-switch-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22);
+    transition: background-color 0.18s ease;
+}
+
+.wesync-switch-track::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    transition: transform 0.18s ease;
+}
+
+.wesync-switch input:checked + .wesync-switch-track {
+    background: #1db954;
+}
+
+.wesync-switch input:checked + .wesync-switch-track::after {
+    transform: translateX(16px);
 }
 
 #wesync-resync {

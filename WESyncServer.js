@@ -38,8 +38,15 @@ console.log = log;
 console.error = log;
 log("Starting WESyncServer...");
 
-// Track ongoing transcoding jobs to prevent duplicate work
+// Track ongoing transcoding jobs and live progress to prevent duplicate work
 const transcodingJobs = new Map();
+const transcodingProgress = new Map();
+
+function parseHmsToSec(hms) {
+    const m = String(hms || "").match(/^(\d+):(\d+):(\d+(?:\.\d+)?)$/);
+    if (!m) return 0;
+    return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseFloat(m[3]);
+}
 
 // 1. Check if Wallpaper Engine is actively running (with in-flight deduplication & maxBuffer)
 let isWeRunningCache = false;
@@ -248,11 +255,23 @@ function getCurrentWEWallpaper() {
     }
 }
 
-async function resolveActiveWallpaper() {
+async function resolveActiveWallpaper(fallbackUnsupported = false) {
     const isWeRunning = await checkWeRunning();
     let wp = "";
+    let isFromWe = false;
     if (isWeRunning) {
         wp = getCurrentWEWallpaper();
+        if (wp) isFromWe = true;
+    }
+    if (wp && isFromWe && fallbackUnsupported) {
+        const detected = detectMediaType(wp);
+        if (detected.type === 'unsupported') {
+            const winWp = await getWindowsWallpaper();
+            if (winWp && detectMediaType(winWp).type !== 'unsupported') {
+                wp = winWp;
+                isFromWe = false;
+            }
+        }
     }
     if (!wp) {
         wp = await getWindowsWallpaper();
@@ -332,11 +351,11 @@ function ensureCacheDir() {
             const now = Date.now();
             const allFiles = fs.readdirSync(tempDir);
             
-            // Clean up stale .tmp files (older than 1 hour)
+            // Clean up orphaned .tmp files when idle, or stale .tmp files (>1h)
             allFiles.filter(f => f.endsWith('.tmp')).forEach(f => {
                 const fp = path.join(tempDir, f);
                 try {
-                    if (now - fs.statSync(fp).mtime.getTime() > 3600000) {
+                    if (transcodingJobs.size === 0 || (now - fs.statSync(fp).mtime.getTime() > 3600000)) {
                         fs.unlinkSync(fp);
                     }
                 } catch(e) {}
@@ -415,7 +434,41 @@ function transcodeVideo(wp, cacheDir) {
 
         const ffmpeg = spawn(ffmpegExe, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
         let errTail = "";
-        ffmpeg.stderr.on('data', (d) => { errTail = (errTail + d.toString()).slice(-1500); });
+        let lineBuf = "";
+        let durationSec = 0;
+        const jobProgress = {
+            active: true,
+            wp,
+            hash,
+            percent: 0,
+            durationSec: 0,
+            currentSec: 0,
+            startedAt: Date.now()
+        };
+        transcodingProgress.set(hash, jobProgress);
+
+        ffmpeg.stderr.on('data', (d) => {
+            const text = d.toString();
+            errTail = (errTail + text).slice(-1500);
+            lineBuf += text;
+            const parts = lineBuf.split(/[\r\n]+/);
+            lineBuf = parts.pop() || "";
+            for (const line of parts) {
+                if (!durationSec) {
+                    const durMatch = line.match(/Duration:\s*(\d+:\d+:\d+(?:\.\d+)?)/);
+                    if (durMatch) {
+                        durationSec = parseHmsToSec(durMatch[1]);
+                        jobProgress.durationSec = durationSec;
+                    }
+                }
+                const timeMatch = line.match(/time=(\d+:\d+:\d+(?:\.\d+)?)/);
+                if (timeMatch && durationSec > 0) {
+                    const cur = parseHmsToSec(timeMatch[1]);
+                    jobProgress.currentSec = cur;
+                    jobProgress.percent = Math.max(0, Math.min(99, Math.round((cur / durationSec) * 100)));
+                }
+            }
+        });
         // Kill runaway transcodes (default 10 minutes) so the client is never stuck forever
         const killTimer = setTimeout(() => {
             console.error("FFmpeg timeout, killing process for " + wp);
@@ -425,6 +478,7 @@ function transcodeVideo(wp, cacheDir) {
         ffmpeg.on('close', (code) => {
             clearTimeout(killTimer);
             transcodingJobs.delete(hash);
+            transcodingProgress.delete(hash);
             if (code !== 0) {
                 console.error(`FFmpeg failed (code ${code}) for ${wp}:\n${errTail}`);
                 if (fs.existsSync(tmpWebm)) {
@@ -447,6 +501,7 @@ function transcodeVideo(wp, cacheDir) {
             clearTimeout(killTimer);
             console.error("FFmpeg spawn error (is FFmpeg installed / FFMPEG_PATH correct?):", err);
             transcodingJobs.delete(hash);
+            transcodingProgress.delete(hash);
             if (fs.existsSync(tmpWebm)) {
                 try { fs.unlinkSync(tmpWebm); } catch(e) {}
             }
@@ -502,10 +557,29 @@ const server = http.createServer(async (req, res) => {
     }
 
     let pathname = "";
-    try { pathname = new URL(req.url, "http://127.0.0.1").pathname; } catch (e) {}
+    let fallbackUnsupported = false;
+    try {
+        const parsedUrl = new URL(req.url, "http://127.0.0.1");
+        pathname = parsedUrl.pathname;
+        fallbackUnsupported = parsedUrl.searchParams.get("fallback") === "1";
+    } catch (e) {}
+
+    if (pathname === "/progress") {
+        const jobs = Array.from(transcodingProgress.values());
+        const latest = jobs.length > 0 ? jobs[jobs.length - 1] : null;
+        const payload = latest
+            ? { active: true, wp: latest.wp, percent: latest.percent, durationSec: latest.durationSec, currentSec: latest.currentSec }
+            : { active: false, wp: "", percent: 0, durationSec: 0, currentSec: 0 };
+        res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store"
+        });
+        res.end(JSON.stringify(payload));
+        return;
+    }
 
     if (pathname === "/path") {
-        const wp = await resolveActiveWallpaper();
+        const wp = await resolveActiveWallpaper(fallbackUnsupported);
         if (!wp) {
             res.setHeader("X-Media-Type", "unsupported");
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
@@ -528,7 +602,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/media" || pathname === "/video") {
-        const wp = await resolveActiveWallpaper();
+        const wp = await resolveActiveWallpaper(fallbackUnsupported);
         if (!wp || !fs.existsSync(wp)) {
             res.writeHead(404);
             res.end("No wallpaper found");
@@ -579,6 +653,10 @@ const server = http.createServer(async (req, res) => {
         try {
             const cacheDir = ensureCacheDir();
             const cachedWebm = await transcodeVideo(wp, cacheDir);
+
+            if (res.destroyed || res.writableEnded || req.destroyed) {
+                return;
+            }
 
             const stat = fs.statSync(cachedWebm);
 

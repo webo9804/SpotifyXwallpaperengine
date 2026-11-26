@@ -20,10 +20,11 @@ Syncs your current **Wallpaper Engine** wallpaper (video or image), or your Wind
 
 - **Real-time sync**: detects your active Wallpaper Engine wallpaper and shows it as the Spotify background.
 - **Automatic fallback**: if Wallpaper Engine is not running, your Windows desktop wallpaper is used instead.
-- **Video and image support**: video wallpapers are transcoded to WebM with FFmpeg and cached; images are served directly.
-- **Background Settings Panel**: adjust background brightness and blur (frosted glass) in real-time from Spotify's top bar (or floating button), with a one-click resync option and persistent preferences.
+- **Video and image support**: video wallpapers are transcoded to WebM with FFmpeg (with live `%` progress) and cached; images are served directly.
+- **Background Settings Panel**: adjust background brightness and blur (frosted glass) in real-time from Spotify's top bar (or floating button), toggle **Auto-Sync** and **Smart Fallback for Scene/Web wallpapers**, or resync with one click.
+- **Smooth crossfade transitions**: new wallpapers preload in the background and fade in smoothly without black flicker.
 - **Bilingual UI**: automatically displays Traditional Chinese or English based on your Spotify/system language.
-- **Change confirmation**: when your wallpaper changes, Spotify asks whether to sync the new one. You can keep the current background.
+- **Change confirmation**: when Auto-Sync is off and your wallpaper changes, Spotify asks whether to sync the new one. You can keep the current background.
 - **Automatic cache cleanup**: only the 10 most recent transcoded videos are kept, and stale temp files are removed.
 - **Transparent theme**: keeps Spotify's UI and text readable on top of the background.
 - **Automated setup and daemon**: missing Node.js, FFmpeg, and Spicetify are installed for you. The background server restarts after a crash and starts at login.

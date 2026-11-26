@@ -3,16 +3,36 @@
     let ignoredBg = localStorage.getItem("we-sync-ignored-bg") || "";
     let failedBg = "";
     let failCount = 0;
+    let retryingBg = "";
     let mediaEl = null;
+    let pendingMediaEl = null;
+    let oldFadingEl = null;
+    let fadeCleanupTimerId = null;
+    let bgSwapSeq = 0;
     let autoplayUnlockHandler = null;
     let isTranscoding = false;
     let transcodeDeadline = 0; // watchdog: never stay in 'transcoding' state forever
+    let transcodeProgressTimerId = null;
+    let isPollingProgress = false;
+    let debugHideTimerId = null;
     let initialized = false;
     let retryCount = 0;
     let pollTimerId = null;
     let isCheckingBg = false;
     let checkSeq = 0;
     let activeAbortController = null;
+
+    const BRIGHTNESS_KEY = "wesync_brightness";
+    const BLUR_KEY = "wesync_blur";
+    const AUTO_SYNC_KEY = "wesync_auto_sync";
+    const SMART_FALLBACK_KEY = "wesync_smart_fallback";
+    const DEFAULT_BRIGHTNESS = 60;
+    const DEFAULT_BLUR = 0;
+    const DEFAULT_AUTO_SYNC = false;
+    const DEFAULT_SMART_FALLBACK = true;
+
+    let autoSync = localStorage.getItem(AUTO_SYNC_KEY) === "1";
+    let smartFallback = localStorage.getItem(SMART_FALLBACK_KEY) !== "0";
 
     // ==========================================
     // Bilingual Localization (zh-TW / en)
@@ -24,6 +44,8 @@
             resetBtn: "重設",
             brightnessLabel: "背景亮度",
             blurLabel: "背景模糊",
+            autoSyncLabel: "自動靜默同步新桌布",
+            fallbackLabel: "不支援格式回退桌布",
             resyncBtn: "重新同步目前桌布",
             resyncing: "🔄 正在重新同步桌布...",
             promptTitle: "🌟 偵測到新桌布",
@@ -36,7 +58,8 @@
             loadingImg: "⏳ 正在載入靜態桌布...",
             vidFailFinal: "⚠️ 影片連續轉檔或載入失敗，已放棄同步此桌布。",
             vidFailRetry: (n) => `⚠️ 影片載入失敗，稍後重試 (${n}/3)`,
-            transcoding: "⏳ 正在針對高畫質桌布進行最佳化轉檔 (約需 10 秒，請稍候)...",
+            transcoding: "⏳ 正在針對高畫質桌布進行最佳化轉檔 (請稍候)...",
+            transcodingProgress: (pct) => `⏳ 正在針對高畫質桌布進行最佳化轉檔 (${pct}%)...`,
             autoplayBlocked: "⚠️ 瀏覽器阻擋自動播放，請「點擊畫面任意處」解鎖",
             vidPlayError: (name) => `⚠️ 影片播放失敗 (${name})`,
             unsupportedInitial: "⚠️ 目前的桌布不是支援的「影片或圖片」格式。",
@@ -50,6 +73,8 @@
             resetBtn: "Reset",
             brightnessLabel: "Brightness",
             blurLabel: "Blur",
+            autoSyncLabel: "Auto-Sync New Wallpaper",
+            fallbackLabel: "Fallback on Scene/Web",
             resyncBtn: "Resync Wallpaper",
             resyncing: "🔄 Resyncing wallpaper...",
             promptTitle: "🌟 New Wallpaper Detected",
@@ -62,7 +87,8 @@
             loadingImg: "⏳ Loading image wallpaper...",
             vidFailFinal: "⚠️ Failed to load/transcode video after 3 attempts; skipped.",
             vidFailRetry: (n) => `⚠️ Video failed to load, retrying (${n}/3)...`,
-            transcoding: "⏳ Optimizing & transcoding video wallpaper (~10s)...",
+            transcoding: "⏳ Optimizing & transcoding video wallpaper...",
+            transcodingProgress: (pct) => `⏳ Optimizing & transcoding video (${pct}%)...`,
             autoplayBlocked: "⚠️ Autoplay blocked. Click anywhere to start",
             vidPlayError: (name) => `⚠️ Video playback failed (${name})`,
             unsupportedInitial: "⚠️ Current wallpaper is not a supported video or image format.",
@@ -122,34 +148,107 @@
     debugText.innerText = t("init");
     document.body.appendChild(debugText);
 
-    function clearMediaElement() {
+    function showDebugStatus(text, autoHideMs = 0) {
+        if (debugHideTimerId) {
+            clearTimeout(debugHideTimerId);
+            debugHideTimerId = null;
+        }
+        debugText.style.opacity = "1";
+        debugText.innerText = text;
+        if (autoHideMs > 0) {
+            debugHideTimerId = setTimeout(() => {
+                debugHideTimerId = null;
+                debugText.style.opacity = "0";
+            }, autoHideMs);
+        }
+    }
+
+    function hideDebugStatus() {
+        if (debugHideTimerId) {
+            clearTimeout(debugHideTimerId);
+            debugHideTimerId = null;
+        }
+        debugText.style.opacity = "0";
+    }
+
+    function stopTranscodeProgressPoll() {
+        if (transcodeProgressTimerId) {
+            clearInterval(transcodeProgressTimerId);
+            transcodeProgressTimerId = null;
+        }
+        isPollingProgress = false;
+    }
+
+    function startTranscodeProgressPoll(expectedSwapSeq) {
+        stopTranscodeProgressPoll();
+        const poll = async () => {
+            if (isPollingProgress || expectedSwapSeq !== bgSwapSeq || !isTranscoding) {
+                if (expectedSwapSeq !== bgSwapSeq || !isTranscoding) stopTranscodeProgressPoll();
+                return;
+            }
+            isPollingProgress = true;
+            try {
+                const res = await fetch("http://127.0.0.1:8989/progress");
+                if (res.ok && expectedSwapSeq === bgSwapSeq && isTranscoding) {
+                    const data = await res.json();
+                    if (data && data.active && typeof data.percent === "number" && data.percent > 0) {
+                        showDebugStatus(t("transcodingProgress", data.percent));
+                    }
+                }
+            } catch (e) {} finally {
+                isPollingProgress = false;
+            }
+        };
+        transcodeProgressTimerId = setInterval(poll, 700);
+        poll();
+    }
+
+    function destroyDomMedia(el) {
+        if (!el) return;
+        if (el.tagName === "VIDEO") {
+            try {
+                el.pause();
+                el.removeAttribute("src");
+                el.load();
+            } catch (e) {}
+        }
+        try { el.remove(); } catch (e) {}
+    }
+
+    function clearPendingMedia() {
+        stopTranscodeProgressPoll();
         if (autoplayUnlockHandler) {
             document.removeEventListener("click", autoplayUnlockHandler);
             autoplayUnlockHandler = null;
         }
+        if (pendingMediaEl) {
+            destroyDomMedia(pendingMediaEl);
+            pendingMediaEl = null;
+        }
+    }
+
+    function clearAllMedia() {
+        bgSwapSeq++;
+        clearPendingMedia();
+        if (fadeCleanupTimerId) {
+            clearTimeout(fadeCleanupTimerId);
+            fadeCleanupTimerId = null;
+        }
+        if (oldFadingEl) {
+            destroyDomMedia(oldFadingEl);
+            oldFadingEl = null;
+        }
         if (mediaEl) {
-            if (mediaEl.tagName === "VIDEO") {
-                try {
-                    mediaEl.pause();
-                    mediaEl.removeAttribute("src");
-                    mediaEl.load();
-                } catch (e) {}
-            }
-            mediaEl.remove();
+            destroyDomMedia(mediaEl);
             mediaEl = null;
         }
     }
 
     // ==========================================
-    // WESync 背景亮度與模糊控制面板
+    // WESync 背景設定面板 (亮度 / 模糊 / 開關 / 重同步)
     // ==========================================
     function initWESyncControls() {
         if (document.getElementById("wesync-panel")) return;
-
-        const BRIGHTNESS_KEY = "wesync_brightness";
-        const BLUR_KEY = "wesync_blur";
-        const DEFAULT_BRIGHTNESS = 60;
-        const DEFAULT_BLUR = 0;
 
         let brightness = parseInt(localStorage.getItem(BRIGHTNESS_KEY), 10);
         if (isNaN(brightness) || brightness < 10 || brightness > 100) {
@@ -202,6 +301,21 @@
                 <span id="wesync-blur-val">${blur}px</span>
             </label>
             <input id="wesync-blur-slider" class="wesync-slider" type="range" min="0" max="20" step="1" value="${blur}" />
+            <div class="wesync-divider"></div>
+            <label class="wesync-toggle-row" for="wesync-autosync">
+                <span id="wesync-autosync-label"></span>
+                <span class="wesync-switch">
+                    <input id="wesync-autosync" type="checkbox" ${autoSync ? "checked" : ""} />
+                    <span class="wesync-switch-track"></span>
+                </span>
+            </label>
+            <label class="wesync-toggle-row" for="wesync-fallback">
+                <span id="wesync-fallback-label"></span>
+                <span class="wesync-switch">
+                    <input id="wesync-fallback" type="checkbox" ${smartFallback ? "checked" : ""} />
+                    <span class="wesync-switch-track"></span>
+                </span>
+            </label>
             <button id="wesync-resync" type="button"></button>
         `;
         document.body.appendChild(panel);
@@ -209,10 +323,14 @@
         const titleEl = panel.querySelector("#wesync-title");
         const brightnessLabelEl = panel.querySelector("#wesync-brightness-label");
         const blurLabelEl = panel.querySelector("#wesync-blur-label");
+        const autoSyncLabelEl = panel.querySelector("#wesync-autosync-label");
+        const fallbackLabelEl = panel.querySelector("#wesync-fallback-label");
         const slider = panel.querySelector("#wesync-slider");
         const valLabel = panel.querySelector("#wesync-val");
         const blurSlider = panel.querySelector("#wesync-blur-slider");
         const blurValLabel = panel.querySelector("#wesync-blur-val");
+        const autoSyncInput = panel.querySelector("#wesync-autosync");
+        const fallbackInput = panel.querySelector("#wesync-fallback");
         const resetBtn = panel.querySelector("#wesync-reset");
         const resyncBtn = panel.querySelector("#wesync-resync");
 
@@ -222,6 +340,8 @@
             resetBtn.title = t("resetBtn");
             brightnessLabelEl.textContent = t("brightnessLabel");
             blurLabelEl.textContent = t("blurLabel");
+            autoSyncLabelEl.textContent = t("autoSyncLabel");
+            fallbackLabelEl.textContent = t("fallbackLabel");
             resyncBtn.textContent = t("resyncBtn");
         }
         refreshPanelTexts();
@@ -238,12 +358,48 @@
             applyVisualSettings(brightness, b);
         });
 
+        autoSyncInput.addEventListener("change", (e) => {
+            autoSync = !!e.target.checked;
+            localStorage.setItem(AUTO_SYNC_KEY, autoSync ? "1" : "0");
+            if (autoSync) {
+                ignoredBg = "";
+                localStorage.removeItem("we-sync-ignored-bg");
+                const existingPrompt = document.getElementById("we-sync-prompt");
+                if (existingPrompt) existingPrompt.remove();
+                checkBg(true);
+            }
+        });
+
+        fallbackInput.addEventListener("change", (e) => {
+            smartFallback = !!e.target.checked;
+            localStorage.setItem(SMART_FALLBACK_KEY, smartFallback ? "1" : "0");
+            ignoredBg = "";
+            failedBg = "";
+            failCount = 0;
+            retryingBg = "";
+            localStorage.removeItem("we-sync-ignored-bg");
+            checkBg(true);
+        });
+
         resetBtn.addEventListener("click", () => {
             slider.value = DEFAULT_BRIGHTNESS;
             valLabel.textContent = `${DEFAULT_BRIGHTNESS}%`;
             blurSlider.value = DEFAULT_BLUR;
             blurValLabel.textContent = `${DEFAULT_BLUR}px`;
             applyVisualSettings(DEFAULT_BRIGHTNESS, DEFAULT_BLUR);
+
+            const prevFallback = smartFallback;
+            autoSync = DEFAULT_AUTO_SYNC;
+            smartFallback = DEFAULT_SMART_FALLBACK;
+            autoSyncInput.checked = autoSync;
+            fallbackInput.checked = smartFallback;
+            localStorage.setItem(AUTO_SYNC_KEY, autoSync ? "1" : "0");
+            localStorage.setItem(SMART_FALLBACK_KEY, smartFallback ? "1" : "0");
+            if (prevFallback !== smartFallback) {
+                ignoredBg = "";
+                localStorage.removeItem("we-sync-ignored-bg");
+                checkBg(true);
+            }
         });
 
         resyncBtn.addEventListener("click", () => {
@@ -263,7 +419,7 @@
             const rect = triggerEl.getBoundingClientRect();
             if (rect.width === 0 && rect.height === 0) return;
 
-            const panelWidth = 244;
+            const panelWidth = 264;
             if (rect.top > window.innerHeight / 2) {
                 panel.style.top = "auto";
                 panel.style.bottom = `${Math.max(16, Math.round(window.innerHeight - rect.top + 8))}px`;
@@ -342,7 +498,7 @@
         }, 300);
     }
 
-    // Initialize brightness/blur controls and dimmer
+    // Initialize controls and dimmer
     initWESyncControls();
 
     function showUpdatePrompt(newBg, isImage, isVideo) {
@@ -442,122 +598,175 @@
         document.head.appendChild(style);
     }
 
+    function getFallbackParam() {
+        return smartFallback ? "1" : "0";
+    }
+
     function applyBackground(bgFile, isImage, isVideo) {
         if (bgFile !== failedBg) {
             failedBg = "";
             failCount = 0;
         }
-        currentBg = bgFile;
         ignoredBg = "";
-        localStorage.setItem("we-sync-current-bg", currentBg);
-        localStorage.setItem("we-sync-ignored-bg", ignoredBg);
+        retryingBg = "";
+        localStorage.setItem("we-sync-ignored-bg", "");
 
-        clearMediaElement();
+        const mySwapSeq = ++bgSwapSeq;
+        clearPendingMedia();
+        if (fadeCleanupTimerId) {
+            clearTimeout(fadeCleanupTimerId);
+            fadeCleanupTimerId = null;
+        }
+        if (oldFadingEl) {
+            destroyDomMedia(oldFadingEl);
+            oldFadingEl = null;
+        }
+
         document.body.style.backgroundImage = "none";
 
         // Force transparency via JS as a safety net for all Spotify versions
         forceTransparency();
 
+        function commitCrossfade(newEl) {
+            if (mySwapSeq !== bgSwapSeq) {
+                destroyDomMedia(newEl);
+                return;
+            }
+            if (mediaEl === newEl) return;
+            const prevEl = mediaEl;
+            if (prevEl && prevEl !== newEl) {
+                try { prevEl.removeAttribute("id"); } catch (e) {}
+                prevEl.style.zIndex = "-3";
+                oldFadingEl = prevEl;
+            }
+            newEl.style.zIndex = "-2";
+            mediaEl = newEl;
+            pendingMediaEl = null;
+            currentBg = bgFile;
+            retryingBg = "";
+            localStorage.setItem("we-sync-current-bg", currentBg);
+
+            const fadeIn = () => {
+                if (mySwapSeq !== bgSwapSeq) return;
+                newEl.style.opacity = "1";
+            };
+            if (typeof requestAnimationFrame === "function") {
+                requestAnimationFrame(() => requestAnimationFrame(fadeIn));
+            } else {
+                fadeIn();
+            }
+
+            if (oldFadingEl) {
+                const retiringEl = oldFadingEl;
+                fadeCleanupTimerId = setTimeout(() => {
+                    fadeCleanupTimerId = null;
+                    if (oldFadingEl === retiringEl) oldFadingEl = null;
+                    if (retiringEl !== mediaEl) destroyDomMedia(retiringEl);
+                }, 650);
+            }
+        }
+
+        function createBackgroundElement(tag, id) {
+            const el = document.createElement(tag);
+            el.id = id;
+            el.style.position = "fixed";
+            el.style.top = "0";
+            el.style.left = "0";
+            el.style.width = "100vw";
+            el.style.height = "100vh";
+            el.style.objectFit = "cover";
+            el.style.zIndex = "-2";
+            el.style.pointerEvents = "none";
+            el.style.opacity = "0";
+            el.style.transition = "opacity 0.6s ease";
+            return el;
+        }
+
+        function onMediaReady(el) {
+            if (mySwapSeq !== bgSwapSeq || mediaEl === el) return;
+            isTranscoding = false;
+            stopTranscodeProgressPoll();
+            failCount = 0;
+            failedBg = "";
+            commitCrossfade(el);
+            showDebugStatus(t("synced"), 2500);
+        }
+
+        function onMediaFailed(finalKey, retryKey) {
+            if (mySwapSeq !== bgSwapSeq) return;
+            isTranscoding = false;
+            clearPendingMedia();
+            if (failedBg === bgFile) failCount++;
+            else { failedBg = bgFile; failCount = 1; }
+
+            if (failCount >= 3) {
+                retryingBg = "";
+                if (!mediaEl) {
+                    currentBg = "";
+                    localStorage.setItem("we-sync-current-bg", "");
+                }
+                showDebugStatus(t(finalKey), 4000);
+            } else {
+                retryingBg = bgFile;
+                showDebugStatus(t(retryKey, failCount));
+            }
+        }
+
+        const mediaUrl = `http://127.0.0.1:8989/media?fallback=${getFallbackParam()}&t=${Date.now()}`;
+
         if (isImage) {
             isTranscoding = false;
-            mediaEl = document.createElement("img");
-            mediaEl.id = "we-sync-img";
-            mediaEl.style.position = "fixed";
-            mediaEl.style.top = "0";
-            mediaEl.style.left = "0";
-            mediaEl.style.width = "100vw";
-            mediaEl.style.height = "100vh";
-            mediaEl.style.objectFit = "cover";
-            mediaEl.style.zIndex = "-2";
-            mediaEl.style.pointerEvents = "none";
+            const imgEl = createBackgroundElement("img", "we-sync-img");
+            pendingMediaEl = imgEl;
 
-            mediaEl.onload = () => {
-                failCount = 0;
-                failedBg = "";
-                debugText.innerText = t("synced");
-                setTimeout(() => { debugText.style.opacity = "0"; }, 2500);
-            };
-            mediaEl.onerror = () => {
-                if (failedBg === bgFile) failCount++;
-                else { failedBg = bgFile; failCount = 1; }
+            imgEl.onload = () => onMediaReady(imgEl);
+            imgEl.onerror = () => onMediaFailed("imgFailFinal", "imgFailRetry");
 
-                if (failCount >= 3) {
-                    clearMediaElement();
-                    currentBg = "";
-                    localStorage.setItem("we-sync-current-bg", "");
-                    debugText.style.opacity = "1";
-                    debugText.innerText = t("imgFailFinal");
-                    setTimeout(() => { debugText.style.opacity = "0"; }, 4000);
-                } else {
-                    debugText.style.opacity = "1";
-                    debugText.innerText = t("imgFailRetry", failCount);
-                    currentBg = ""; // Reset so it retries on next check
-                    localStorage.setItem("we-sync-current-bg", "");
-                }
-            };
+            showDebugStatus(t("loadingImg"));
 
-            debugText.style.opacity = "1";
-            debugText.innerText = t("loadingImg");
-
-            mediaEl.src = "http://127.0.0.1:8989/media?t=" + Date.now();
-            document.body.prepend(mediaEl);
+            imgEl.src = mediaUrl;
+            document.body.prepend(imgEl);
         }
         else if (isVideo) {
-            const container = document.createElement("div");
-            container.innerHTML = `<video id="we-sync-video" autoplay loop muted playsinline style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -2; pointer-events: none;"></video>`;
-            mediaEl = container.firstChild;
-            mediaEl.volume = 0;
-            mediaEl.defaultMuted = true;
+            const vidEl = createBackgroundElement("video", "we-sync-video");
+            vidEl.autoplay = true;
+            vidEl.loop = true;
+            vidEl.muted = true;
+            vidEl.defaultMuted = true;
+            vidEl.playsInline = true;
+            vidEl.volume = 0;
+            vidEl.setAttribute("autoplay", "");
+            vidEl.setAttribute("loop", "");
+            vidEl.setAttribute("muted", "");
+            vidEl.setAttribute("playsinline", "");
+            pendingMediaEl = vidEl;
 
-            mediaEl.addEventListener("error", function() {
-                isTranscoding = false;
-                if (failedBg === bgFile) failCount++;
-                else { failedBg = bgFile; failCount = 1; }
+            vidEl.addEventListener("error", () => onMediaFailed("vidFailFinal", "vidFailRetry"));
+            vidEl.addEventListener("playing", () => onMediaReady(vidEl));
 
-                if (failCount >= 3) {
-                    clearMediaElement();
-                    currentBg = "";
-                    localStorage.setItem("we-sync-current-bg", "");
-                    debugText.style.opacity = "1";
-                    debugText.innerText = t("vidFailFinal");
-                    setTimeout(() => { debugText.style.opacity = "0"; }, 4000);
-                } else {
-                    debugText.style.opacity = "1";
-                    debugText.innerText = t("vidFailRetry", failCount);
-                    currentBg = ""; // Reset so it retries on next check
-                    localStorage.setItem("we-sync-current-bg", "");
-                }
-            });
-            mediaEl.addEventListener("playing", function() {
-                isTranscoding = false;
-                failCount = 0; // Reset fail count on success
-                failedBg = "";
-                debugText.innerText = t("synced");
-                setTimeout(() => { debugText.style.opacity = "0"; }, 2500);
-            });
-
-            debugText.style.opacity = "1";
-            debugText.innerText = t("transcoding");
+            showDebugStatus(t("transcoding"));
             isTranscoding = true;
             transcodeDeadline = Date.now() + 3 * 60 * 1000;
+            startTranscodeProgressPoll(mySwapSeq);
 
-            mediaEl.src = "http://127.0.0.1:8989/media?t=" + Date.now();
-            document.body.prepend(mediaEl);
-            mediaEl.load();
-            mediaEl.play().catch(function(err) {
+            vidEl.src = mediaUrl;
+            document.body.prepend(vidEl);
+            vidEl.load();
+            vidEl.play().catch(function(err) {
+                if (mySwapSeq !== bgSwapSeq) return;
                 if (err.name === "NotAllowedError") {
-                    debugText.style.opacity = "1";
-                    debugText.innerText = t("autoplayBlocked");
+                    stopTranscodeProgressPoll();
+                    showDebugStatus(t("autoplayBlocked"));
                     isTranscoding = false;
 
                     if (autoplayUnlockHandler) {
                         document.removeEventListener("click", autoplayUnlockHandler);
                     }
                     autoplayUnlockHandler = () => {
-                        if (mediaEl && mediaEl.paused) {
-                            mediaEl.play().then(() => {
-                                debugText.innerText = t("synced");
-                                setTimeout(() => { debugText.style.opacity = "0"; }, 2500);
+                        if (mySwapSeq !== bgSwapSeq) return;
+                        if (vidEl && vidEl.paused) {
+                            vidEl.play().then(() => {
+                                onMediaReady(vidEl);
                             }).catch(() => {});
                         }
                         if (autoplayUnlockHandler) {
@@ -570,10 +779,10 @@
                     console.log("Play interrupted (likely loading new video)");
                 } else {
                     console.error("Video playback failed:", err);
+                    stopTranscodeProgressPoll();
                     isTranscoding = false;
-                    debugText.style.opacity = "1";
-                    debugText.innerText = t("vidPlayError", err.name);
-                    setTimeout(() => { debugText.style.opacity = "0"; }, 4000);
+                    clearPendingMedia();
+                    showDebugStatus(t("vidPlayError", err.name), 4000);
                 }
             });
         }
@@ -589,6 +798,7 @@
         currentBg = "";
         failedBg = "";
         failCount = 0;
+        retryingBg = "";
         retryCount = 0;
         isTranscoding = false;
         transcodeDeadline = 0;
@@ -598,9 +808,8 @@
         const existingPrompt = document.getElementById("we-sync-prompt");
         if (existingPrompt) existingPrompt.remove();
 
-        clearMediaElement();
-        debugText.style.opacity = "1";
-        debugText.innerText = t("resyncing");
+        clearAllMedia();
+        showDebugStatus(t("resyncing"));
         checkBg(true);
     }
 
@@ -626,7 +835,7 @@
             activeAbortController = controller;
             const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-            const res = await fetch("http://127.0.0.1:8989/path", { signal: controller.signal });
+            const res = await fetch(`http://127.0.0.1:8989/path?fallback=${getFallbackParam()}`, { signal: controller.signal });
             clearTimeout(timeoutId);
             if (activeAbortController === controller) activeAbortController = null;
             if (mySeq !== checkSeq) return;
@@ -641,15 +850,18 @@
             if (mySeq !== checkSeq) return;
 
             if (!bgFile) {
-                // If no wallpaper is found (WE not running & no Windows wallpaper), hide the loading text
-                debugText.style.opacity = "0";
+                const stalePrompt = document.getElementById("we-sync-prompt");
+                if (stalePrompt) stalePrompt.remove();
+                hideDebugStatus();
                 scheduleNextCheck(5000);
                 return;
             }
 
             if (!initialized || retryCount > 0) {
                 initialized = true;
-                if (!isManual) debugText.style.opacity = "0";
+                if (!isManual && !isTranscoding && !pendingMediaEl) {
+                    hideDebugStatus();
+                }
             }
             retryCount = 0;
 
@@ -669,14 +881,11 @@
             }
 
             if (!isVideo && !isImage) {
-                if (currentBg === "") {
-                    debugText.style.opacity = "1";
-                    debugText.innerText = t("unsupportedInitial");
+                if (!mediaEl && !pendingMediaEl) {
+                    showDebugStatus(t("unsupportedInitial"));
                     document.body.style.backgroundImage = "none";
                 } else if (bgFile !== ignoredBg) {
-                    debugText.style.opacity = "1";
-                    debugText.innerText = t("unsupportedKeep");
-                    setTimeout(() => { debugText.style.opacity = "0"; }, 4000);
+                    showDebugStatus(t("unsupportedKeep"), 4000);
                     ignoredBg = bgFile;
                     localStorage.setItem("we-sync-ignored-bg", ignoredBg);
                 }
@@ -684,13 +893,22 @@
                 return;
             }
 
+            if (bgFile === currentBg) {
+                const stalePrompt = document.getElementById("we-sync-prompt");
+                if (stalePrompt) stalePrompt.remove();
+            }
+
             if (failedBg === bgFile && failCount >= 3) {
                 // Failed 3 times for this wallpaper in this session; wait for change or manual resync
-            } else if (!mediaEl) {
+            } else if (pendingMediaEl) {
+                // Preload or transcode already in progress
+            } else if (!mediaEl || bgFile === retryingBg) {
                 applyBackground(bgFile, isImage, isVideo);
             } else if (bgFile !== currentBg && bgFile !== ignoredBg) {
-                if (currentBg === "") {
-                    applyBackground(bgFile, isImage, isVideo); // silent retry after a failed load
+                if (currentBg === "" || autoSync) {
+                    const existingPrompt = document.getElementById("we-sync-prompt");
+                    if (existingPrompt) existingPrompt.remove();
+                    applyBackground(bgFile, isImage, isVideo);
                 } else {
                     showUpdatePrompt(bgFile, isImage, isVideo);
                 }
@@ -699,11 +917,10 @@
         } catch (e) {
             if (mySeq !== checkSeq) return;
             retryCount++;
-            debugText.style.opacity = "1";
             if (retryCount <= 3) {
-                debugText.innerText = t("waitingServer", retryCount);
+                showDebugStatus(t("waitingServer", retryCount));
             } else {
-                debugText.innerText = t("serverOffline");
+                showDebugStatus(t("serverOffline"));
             }
             scheduleNextCheck(retryCount > 3 ? 10000 : 3000);
         } finally {
