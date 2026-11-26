@@ -1,4 +1,6 @@
-:root {
+:root,
+.encore-dark-theme,
+.encore-dark-theme .encore-base-set {
   --background-base: transparent !important;
   --background-highlight: rgba(255, 255, 255, 0.1) !important;
   --background-press: rgba(255, 255, 255, 0.2) !important;
@@ -52,16 +54,23 @@ html,
 .main-topBar-background,
 .main-topBar-overlay,
 .main-view-container__scroll-node-child-blinder,
-.under-main-view {
+.under-main-view,
+.main-home-homeHeader,
+.main-home-filterChipsSection,
+.main-home-filterChipsSectionActive,
+.main-home-filterChipsSection::after,
+[class*="homeHeader"],
+[class*="HomeHeader"],
+.XiGPipKcauwrdcuz {
     background-color: transparent !important;
     background-image: none !important;
     background: transparent !important;
     opacity: 0 !important;
     box-shadow: none !important;
+    pointer-events: none !important;
 }
 
-/* 首頁篩選列與歌曲清單標題列：只透明背景，不要設 opacity: 0 隱藏文字 */
-.main-home-homeHeader,
+/* 歌曲清單標題列：只透明背景，不要設 opacity: 0 隱藏欄位文字 */
 .main-trackList-trackListHeader {
     background-color: transparent !important;
     background-image: none !important;

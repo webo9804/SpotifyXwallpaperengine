@@ -120,7 +120,8 @@
     // Remove old elements if they exist (prevents duplicates on hot reload)
     const oldIds = [
         "we-sync-debug", "we-sync-video", "we-sync-img",
-        "we-sync-prompt", "wesync-dimmer", "wesync-panel", "wesync-fab"
+        "we-sync-prompt", "wesync-dimmer", "wesync-panel",
+        "wesync-fab", "we-sync-force-css"
     ];
     oldIds.forEach((id) => {
         const el = document.getElementById(id);
@@ -498,8 +499,9 @@
         }, 300);
     }
 
-    // Initialize controls and dimmer
+    // Initialize controls, dimmer, and immediate base transparency
     initWESyncControls();
+    forceTransparency();
 
     function showUpdatePrompt(newBg, isImage, isVideo) {
         // If a prompt already exists, remove it first so we always show the LATEST wallpaper
@@ -557,7 +559,9 @@
         const style = document.createElement("style");
         style.id = "we-sync-force-css";
         style.textContent = `
-            :root {
+            :root,
+            .encore-dark-theme,
+            .encore-dark-theme .encore-base-set {
                 --background-base: transparent !important;
                 --background-highlight: rgba(255, 255, 255, 0.1) !important;
                 --background-press: rgba(255, 255, 255, 0.2) !important;
@@ -584,9 +588,16 @@
             }
             [class*="entityHeader-background"], [class*="entityHeader-overlay"],
             [class*="actionBarBackground"], [class*="topBar-background"],
-            [class*="topBar-overlay"], [class*="blinder"], [class*="under-main-view"] {
+            [class*="topBar-overlay"], [class*="blinder"], [class*="under-main-view"],
+            .main-home-homeHeader, .main-home-filterChipsSection,
+            .main-home-filterChipsSectionActive, .main-home-filterChipsSection::after,
+            [class*="homeHeader"], [class*="HomeHeader"], .XiGPipKcauwrdcuz {
+                background-color: transparent !important;
+                background-image: none !important;
                 background: transparent !important;
                 opacity: 0 !important;
+                box-shadow: none !important;
+                pointer-events: none !important;
             }
             .main-yourLibraryX-entryPoints, .main-yourLibraryX-libraryContainer,
             .main-nowPlayingView-contextItemInfo, .main-nowPlayingView-section, .main-nowPlayingView-content,
